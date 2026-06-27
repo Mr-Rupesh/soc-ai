@@ -1,0 +1,36 @@
+# Orchestration
+langgraph
+langchain
+langchain-core
+
+# LLM Providers
+langchain-groq
+langchain-google-genai
+groq
+google-generativeai
+
+# Vector Memory
+chromadb
+
+# API Layer
+fastapi
+uvicorn[standard]
+httpx
+
+# UI
+streamlit
+
+# Validation
+pydantic
+pydantic-settings
+
+# Utilities
+python-dotenv
+requests
+aiofiles
+
+# Tracing
+langsmith
+
+# Threat Intel
+OTXv2
