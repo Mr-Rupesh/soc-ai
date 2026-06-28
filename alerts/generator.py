@@ -4,7 +4,10 @@ import time
 import requests
 import json
 from datetime import datetime, timezone
-from schemas import AlertSchema, SeverityLevel, EventType
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from alerts.schemas import AlertSchema, SeverityLevel, EventType
 
 # ── FastAPI target ─────────────────────────────────────────────────────────────
 # This is where generator POSTs alerts to.
