@@ -11,7 +11,7 @@ from alerts.schemas import AlertSchema, SeverityLevel, EventType
 
 # ── FastAPI target ─────────────────────────────────────────────────────────────
 # This is where generator POSTs alerts to.
-# FastAPI isn't built yet — generator will fail gracefully until it is.
+# FastAPI isn't built yet — generator will fail gracefully until it is built.
 API_URL = "http://127.0.0.1:8000/alerts/ingest"
 
 # ── Realistic data pools ───────────────────────────────────────────────────────
