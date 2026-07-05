@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator, ConfigD
 from enum import Enum
 from datetime import datetime, timezone
 from typing import Optional
+from ipaddress import ip_address
 import uuid
 
 
@@ -95,12 +96,22 @@ class AlertSchema(BaseModel):
     @classmethod
     def validate_ip(cls, v):
         """
-        Basic guard — rejects obviously wrong values like empty strings.
-        Not doing full RFC validation here; generator controls input anyway.
+        Ensures the value is a valid IPv4 or IPv6 address.
         """
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("IP address must be a non-empty string")
-        return v.strip()
+        if not isinstance(v, str):
+            raise ValueError("IP address must be a string")
+
+        v = v.strip()
+        if not v:
+            raise ValueError("IP address cannot be empty")
+
+        try:
+            # Validates the IP address
+            ip_address(v)
+        except ValueError:
+            raise ValueError(f"Invalid IP address: {v}")
+
+        return v
 
     model_config = ConfigDict(use_enum_values=True)
 
