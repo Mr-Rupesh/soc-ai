@@ -45,7 +45,8 @@ Severity definitions:
 - LOW      : Informational. No action needed.
 - MEDIUM   : Monitor. May need investigation.
 - HIGH     : Investigate within 1 hour. escalate=True.
-- CRITICAL : immediate response required, escalate=True always.\n\nRespond with ONLY a JSON object with exactly these keys: severity, escalate, confidence_score, reasoning. No other keys. No markdown.
+- CRITICAL : immediate response required, escalate=True always.\n\n
+Respond with ONLY a JSON object with exactly these keys: severity, escalate, confidence_score, reasoning. No other keys. No markdown.
 """),
     ("human", """Security Alert:
 Event Type : {event_type}
