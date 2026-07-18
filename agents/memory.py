@@ -5,7 +5,7 @@ from memory.chromadb_manager import find_similar
 
 _client = Groq(api_key=config.GROQ_API_KEY)
 
-MEMORY_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # per your spec
+MEMORY_MODEL = config.GROQ_MODELS["memory"]  # per your spec
 
 SYSTEM_PROMPT = """You are a SOC memory analyst. Given a current security alert
 and a list of similar past incidents, write a SHORT summary (2-3 sentences max)

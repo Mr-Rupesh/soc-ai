@@ -13,6 +13,7 @@ import asyncio
 
 from alerts.schemas import AlertSchema
 from api.models import IngestResponse, StatusResponse, AlertSummary
+from pipeline.graph import compiled_graph  # ← real pipeline, built once at import
 
 # ── App setup ──────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -21,7 +22,6 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Allow Streamlit (running on port 8501) to call this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8501", "http://127.0.0.1:8501"],
@@ -30,55 +30,66 @@ app.add_middleware(
 )
 
 # ── In-memory alert store ──────────────────────────────────────────────────────
-# Week 1: simple dict. Week 2: this feeds ChromaDB + pipeline results.
-# Key = alert_id, Value = dict with alert data + processing state
 alert_store: dict[str, dict[str, Any]] = {}
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────
 async def run_pipeline(alert_id: str, alert: AlertSchema):
     """
-    Placeholder for the LangGraph pipeline.
-    Week 2: this calls pipeline/graph.py with the alert.
-    For now: simulates processing with a 2-second delay.
-    
-    Runs as a BackgroundTask — FastAPI returns the ingest response immediately,
-    then this runs after. This is why the dashboard shows 'processed: False'
-    briefly after an alert arrives.
+    Runs the alert through the real LangGraph pipeline (Triage → Analysis →
+    Memory → Response → Report). Replaces the Week 1 placeholder.
+
+    Why asyncio.to_thread(): compiled_graph.invoke() is SYNCHRONOUS — Groq/OTX/
+    ChromaDB calls inside your agents are all blocking calls, not async. If we
+    called invoke() directly inside this async function, it would BLOCK the
+    entire FastAPI event loop while the pipeline runs (several seconds per
+    alert), freezing every other request — including /health checks from
+    Streamlit. to_thread() runs the blocking call in a separate thread so
+    FastAPI stays responsive to other requests while this alert processes.
+    This is the single most common async mistake with LangGraph + FastAPI.
     """
-    await asyncio.sleep(2)  # Placeholder — replace with actual pipeline call in Week 2
-    alert_store[alert_id]["processed"] = True
-    alert_store[alert_id]["result"]    = {"status": "pipeline_placeholder — Week 2"}
-    print(f"  🔄 [Pipeline placeholder] Alert {alert_id[:8]}... marked processed")
+    initial_state = {"alert": alert.model_dump(mode="json"), "errors": []}
+
+    try:
+        final_state = await asyncio.to_thread(compiled_graph.invoke, initial_state)
+
+        alert_store[alert_id]["processed"] = True
+        alert_store[alert_id]["result"] = {
+            "final_report":     final_state.get("final_report"),
+            "triage_severity":  final_state.get("triage_severity"),
+            "attack_type":      final_state.get("attack_type"),
+            "mitre_id":         final_state.get("mitre_id"),
+            "hitl_required":    final_state.get("hitl_required"),
+            "ir_actions":       final_state.get("ir_actions"),
+            "errors":           final_state.get("errors", []),
+        }
+        print(f"  ✅ [Pipeline] Alert {alert_id[:8]}... completed | "
+              f"Severity: {final_state.get('triage_severity')} | "
+              f"HITL: {final_state.get('hitl_required')}")
+
+    except Exception as e:
+        # Pipeline-level failure (shouldn't happen often — each agent has its
+        # own try/except — but this catches anything that slips through, e.g.
+        # a LangGraph routing error, so the dashboard shows a clear failure
+        # state instead of hanging on "processed: False" forever.
+        alert_store[alert_id]["processed"] = True
+        alert_store[alert_id]["result"] = {"status": "pipeline_error", "error": str(e)}
+        print(f"  ❌ [Pipeline] Alert {alert_id[:8]}... failed: {e}")
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.get("/health", response_model=StatusResponse)
 async def health_check():
-    """
-    Streamlit calls this first to confirm API is alive.
-    Also shows how many alerts have been received.
-    """
     return StatusResponse(
         status="ok",
         total_alerts=len(alert_store),
-        pipeline_ready=False,   # Becomes True in Week 2
+        pipeline_ready=True,   # ← now True, real pipeline is wired in
     )
 
 
 @app.post("/alerts/ingest", response_model=IngestResponse)
 async def ingest_alert(alert: AlertSchema, background_tasks: BackgroundTasks):
-    """
-    Main entry point — generator POSTs here.
-    
-    1. FastAPI automatically validates incoming JSON against AlertSchema
-       If a field is wrong/missing → 422 error returned, no code needed
-    2. Store alert in memory
-    3. Queue pipeline run as background task (non-blocking)
-    4. Return confirmation immediately so generator isn't waiting
-    """
-    # Store with processing state
     alert_store[alert.alert_id] = {
         "alert":     alert.model_dump(mode="json"),
         "processed": False,
@@ -86,7 +97,6 @@ async def ingest_alert(alert: AlertSchema, background_tasks: BackgroundTasks):
         "received":  datetime.now(timezone.utc).isoformat(),
     }
 
-    # Queue pipeline — runs after response is sent
     background_tasks.add_task(run_pipeline, alert.alert_id, alert)
 
     print(f"  📥 Received [{alert.severity}] {alert.event_type} — ID: {alert.alert_id[:8]}...")
@@ -101,12 +111,7 @@ async def ingest_alert(alert: AlertSchema, background_tasks: BackgroundTasks):
 
 @app.get("/alerts", response_model=list[AlertSummary])
 async def get_alerts(limit: int = 50):
-    """
-    Streamlit dashboard calls this to get the alert list.
-    Returns most recent alerts first, up to `limit`.
-    """
     summaries = []
-    # Reverse order so newest alerts appear first
     for alert_id, record in list(reversed(list(alert_store.items())))[:limit]:
         a = record["alert"]
         summaries.append(AlertSummary(
@@ -124,7 +129,6 @@ async def get_alerts(limit: int = 50):
 
 @app.get("/alerts/{alert_id}")
 async def get_alert(alert_id: str):
-    """Get full detail for one alert — Streamlit uses this for the detail view."""
     if alert_id not in alert_store:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
     return alert_store[alert_id]
@@ -132,7 +136,6 @@ async def get_alert(alert_id: str):
 
 @app.delete("/alerts/clear")
 async def clear_alerts():
-    """Dev utility — clears all alerts from memory. Useful during testing."""
     count = len(alert_store)
     alert_store.clear()
     return {"cleared": count}

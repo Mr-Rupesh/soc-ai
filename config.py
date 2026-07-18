@@ -12,13 +12,13 @@ PRIMARY_LLM = "groq"  # Options: "groq" | "gemini"
 GROQ_MODELS = {
     "triage":   "llama-3.1-8b-instant",   # Fast, cheap — classification only
     "analysis": "llama-3.3-70b-versatile", # Heavy reasoning — attack identification
-    "memory":   "meta-llama/llama-4-scout-17b-16e-instruct",  # Context window — similarity
+    "memory":   "openai/gpt-oss-120b",  # Context window — similarity
     "response": "llama-3.3-70b-versatile", # Heavy reasoning — IR plan generation
     "report":   "llama-3.1-8b-instant",   # Structured output — summarization
 }
 
 # Gemini fallback (used when Groq rate-limits or PRIMARY_LLM = "gemini")
-GEMINI_MODEL = "gemini-2.0-flash-lite"
+GEMINI_MODEL = "gemini-3-flash-preview"  # Fast, cheap — classification only
 
 # ── API Keys (loaded from .env) ────────────────────────────────────────────────
 GROQ_API_KEY       = os.getenv("GROQ_API_KEY")
