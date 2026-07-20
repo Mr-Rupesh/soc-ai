@@ -17,38 +17,40 @@ Do not repeat raw data verbatim; synthesize it."""
 
 
 def run_memory_agent(state: dict) -> dict:
-    """
-    LangGraph node. Reads `state["alert"]`, writes `state["memory_summary"]`
-    and `state["similar_incidents"]` (raw list, kept for Report agent later).
-    """
     alert = state["alert"]
     similar = find_similar(alert["raw_log"], n_results=3)
 
     if not similar:
-        state["memory_summary"] = "No similar past incidents found — this is a novel pattern for this system."
-        state["similar_incidents"] = []
-        return state
+        return {
+            "memory_summary": "No similar past incidents found — this is a novel pattern for this system.",
+            "similar_incidents": [],
+        }
 
-    # Format matches into plain text for the prompt — NOT JSON, since this
-    # is just context for the LLM to read, not data it needs to parse back out.
     incidents_text = "\n".join(
         f"- similarity={i['similarity']}, severity={i['severity']}, "
         f"attack_type={i['attack_type']}, false_positive={i['false_positive']}"
         for i in similar
     )
 
-    response = _client.chat.completions.create(
-        model=MEMORY_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Current alert log: {alert['raw_log']}\n\n"
-                                         f"Similar past incidents:\n{incidents_text}"},
-        ],
-        temperature=0.3,  # low — this is summarization, not creative reasoning
-        max_tokens=150,
-    )
+    try:
+        response = _client.chat.completions.create(
+            model=MEMORY_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Current alert log: {alert['raw_log']}\n\n"
+                                             f"Similar past incidents:\n{incidents_text}"},
+            ],
+            temperature=0.3,
+            max_tokens=150,
+        )
+        summary = response.choices[0].message.content.strip()
+        print(f"  🧠 Memory: {summary[:80]}...")
+        return {"memory_summary": summary, "similar_incidents": similar}
 
-    state["memory_summary"] = response.choices[0].message.content.strip()
-    state["similar_incidents"] = similar
-    print(f"  🧠 Memory: {state['memory_summary'][:80]}...")
-    return state
+    except Exception as e:
+        print(f"  ❌ [memory] {type(e).__name__}: {e}")
+        return {
+            "memory_summary": "Memory agent failed — no historical synthesis available.",
+            "similar_incidents": similar,   # raw matches still useful even if LLM summary failed
+            "errors": state.get("errors", []) + [f"[memory] {type(e).__name__}: {e}"],
+        }

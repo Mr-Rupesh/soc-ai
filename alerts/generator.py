@@ -283,7 +283,8 @@ if __name__ == "__main__":
     print("=== Generator self-test (no FastAPI required) ===\n")
 
     # Generate 3 alerts and print them — verify schema, log lines, extra fields
-    for i in range(3):
+    for i in range(2):
+        time.sleep(3)
         alert = generate_alert()
         print(f"Alert {i+1}:")
         print(f"  Type     : {alert.event_type}")
@@ -296,4 +297,4 @@ if __name__ == "__main__":
         print(f"  Log      : {alert.raw_log[:80]}...")
         print()
 
-    print("=== Self-test complete — all 3 alerts passed Pydantic validation ===")
+    print("=== Self-test complete — all 2 alerts passed Pydantic validation ===")

@@ -14,7 +14,7 @@ import config  # Must be first — activates LangSmith tracing
 from groq import Groq
 
 _client = Groq(api_key=config.GROQ_API_KEY)
-REPORT_MODEL = "llama-3.1-8b-instant"  # matches config.GROQ_MODELS["report"] — fast, cheap, pure summarization
+REPORT_MODEL = config.GROQ_MODELS["report"] # matches config.GROQ_MODELS["report"] — fast, cheap, pure summarization
 
 REPORT_PROMPT_TEMPLATE = """You are a SOC report writer. Write a CONCISE markdown
 incident report (under 200 words) from the data below. Use these exact section

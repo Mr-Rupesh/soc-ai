@@ -139,3 +139,34 @@ async def clear_alerts():
     count = len(alert_store)
     alert_store.clear()
     return {"cleared": count}
+
+
+from pipeline.hitl import approve_alert, reject_alert
+from pydantic import BaseModel
+
+class HitlDecision(BaseModel):
+    analyst_note: str = ""
+
+
+@app.post("/alerts/{alert_id}/approve")
+async def approve(alert_id: str, decision: HitlDecision):
+    if alert_id not in alert_store:
+        raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
+
+    try:
+        updated = approve_alert(alert_store[alert_id], decision.analyst_note)
+        return {"success": True, "alert_id": alert_id, "hitl_approved": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/alerts/{alert_id}/reject")
+async def reject(alert_id: str, decision: HitlDecision):
+    if alert_id not in alert_store:
+        raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
+
+    try:
+        updated = reject_alert(alert_store[alert_id], decision.analyst_note)
+        return {"success": True, "alert_id": alert_id, "hitl_approved": False}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
