@@ -15,3 +15,5 @@ __pycache__/
 # IDE
 .vscode/
 *.egg-info/
+
+alerts.db

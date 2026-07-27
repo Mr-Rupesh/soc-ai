@@ -12,8 +12,9 @@ from typing import Any
 import asyncio
 
 from alerts.schemas import AlertSchema
+from alerts.db import init_db, save_alert, update_alert_result, get_alert, get_all_alerts, clear_all
 from api.models import IngestResponse, StatusResponse, AlertSummary
-from pipeline.graph import compiled_graph  # ← real pipeline, built once at import
+from pipeline.graph import compiled_graph
 
 # ── App setup ──────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -29,51 +30,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── In-memory alert store ──────────────────────────────────────────────────────
-alert_store: dict[str, dict[str, Any]] = {}
+# ── Initialize SQLite on startup ────────────────────────────────────────────
+init_db()
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────
 async def run_pipeline(alert_id: str, alert: AlertSchema):
     """
-    Runs the alert through the real LangGraph pipeline (Triage → Analysis →
-    Memory → Response → Report). Replaces the Week 1 placeholder.
-
-    Why asyncio.to_thread(): compiled_graph.invoke() is SYNCHRONOUS — Groq/OTX/
-    ChromaDB calls inside your agents are all blocking calls, not async. If we
-    called invoke() directly inside this async function, it would BLOCK the
-    entire FastAPI event loop while the pipeline runs (several seconds per
-    alert), freezing every other request — including /health checks from
-    Streamlit. to_thread() runs the blocking call in a separate thread so
-    FastAPI stays responsive to other requests while this alert processes.
-    This is the single most common async mistake with LangGraph + FastAPI.
+    Runs the alert through the real LangGraph pipeline. Same async-bridging
+    logic as before — asyncio.to_thread() keeps FastAPI's event loop free
+    while the blocking Groq/OTX/ChromaDB calls run in a separate thread.
     """
     initial_state = {"alert": alert.model_dump(mode="json"), "errors": []}
 
     try:
         final_state = await asyncio.to_thread(compiled_graph.invoke, initial_state)
 
-        alert_store[alert_id]["processed"] = True
-        alert_store[alert_id]["result"] = {
+        result = {
             "final_report":     final_state.get("final_report"),
             "triage_severity":  final_state.get("triage_severity"),
             "attack_type":      final_state.get("attack_type"),
             "mitre_id":         final_state.get("mitre_id"),
             "hitl_required":    final_state.get("hitl_required"),
+            "hitl_approved":    None,  # unset until analyst acts
             "ir_actions":       final_state.get("ir_actions"),
             "errors":           final_state.get("errors", []),
         }
+        update_alert_result(alert_id, result)
+
         print(f"  ✅ [Pipeline] Alert {alert_id[:8]}... completed | "
               f"Severity: {final_state.get('triage_severity')} | "
               f"HITL: {final_state.get('hitl_required')}")
 
     except Exception as e:
-        # Pipeline-level failure (shouldn't happen often — each agent has its
-        # own try/except — but this catches anything that slips through, e.g.
-        # a LangGraph routing error, so the dashboard shows a clear failure
-        # state instead of hanging on "processed: False" forever.
-        alert_store[alert_id]["processed"] = True
-        alert_store[alert_id]["result"] = {"status": "pipeline_error", "error": str(e)}
+        update_alert_result(alert_id, {"status": "pipeline_error", "error": str(e)})
         print(f"  ❌ [Pipeline] Alert {alert_id[:8]}... failed: {e}")
 
 
@@ -81,21 +71,17 @@ async def run_pipeline(alert_id: str, alert: AlertSchema):
 
 @app.get("/health", response_model=StatusResponse)
 async def health_check():
+    all_alerts = get_all_alerts(limit=10000)  # count only — fine at this scale
     return StatusResponse(
         status="ok",
-        total_alerts=len(alert_store),
-        pipeline_ready=True,   # ← now True, real pipeline is wired in
+        total_alerts=len(all_alerts),
+        pipeline_ready=True,
     )
 
 
 @app.post("/alerts/ingest", response_model=IngestResponse)
 async def ingest_alert(alert: AlertSchema, background_tasks: BackgroundTasks):
-    alert_store[alert.alert_id] = {
-        "alert":     alert.model_dump(mode="json"),
-        "processed": False,
-        "result":    None,
-        "received":  datetime.now(timezone.utc).isoformat(),
-    }
+    save_alert(alert.alert_id, alert.model_dump(mode="json"))
 
     background_tasks.add_task(run_pipeline, alert.alert_id, alert)
 
@@ -104,15 +90,16 @@ async def ingest_alert(alert: AlertSchema, background_tasks: BackgroundTasks):
     return IngestResponse(
         success   = True,
         alert_id  = alert.alert_id,
-        message   = f"Alert queued for processing",
+        message   = "Alert queued for processing",
         timestamp = datetime.now(timezone.utc),
     )
 
 
 @app.get("/alerts", response_model=list[AlertSummary])
 async def get_alerts(limit: int = 50):
+    records = get_all_alerts(limit=limit)
     summaries = []
-    for alert_id, record in list(reversed(list(alert_store.items())))[:limit]:
+    for record in records:
         a = record["alert"]
         summaries.append(AlertSummary(
             alert_id   = a["alert_id"],
@@ -128,16 +115,16 @@ async def get_alerts(limit: int = 50):
 
 
 @app.get("/alerts/{alert_id}")
-async def get_alert(alert_id: str):
-    if alert_id not in alert_store:
+async def get_alert_by_id(alert_id: str):
+    record = get_alert(alert_id)
+    if not record:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
-    return alert_store[alert_id]
+    return record
 
 
 @app.delete("/alerts/clear")
 async def clear_alerts():
-    count = len(alert_store)
-    alert_store.clear()
+    count = clear_all()
     return {"cleared": count}
 
 
@@ -150,11 +137,13 @@ class HitlDecision(BaseModel):
 
 @app.post("/alerts/{alert_id}/approve")
 async def approve(alert_id: str, decision: HitlDecision):
-    if alert_id not in alert_store:
+    record = get_alert(alert_id)
+    if not record:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
 
     try:
-        updated = approve_alert(alert_store[alert_id], decision.analyst_note)
+        updated = approve_alert(record, decision.analyst_note)
+        update_alert_result(alert_id, updated["result"])
         return {"success": True, "alert_id": alert_id, "hitl_approved": True}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -162,11 +151,13 @@ async def approve(alert_id: str, decision: HitlDecision):
 
 @app.post("/alerts/{alert_id}/reject")
 async def reject(alert_id: str, decision: HitlDecision):
-    if alert_id not in alert_store:
+    record = get_alert(alert_id)
+    if not record:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
 
     try:
-        updated = reject_alert(alert_store[alert_id], decision.analyst_note)
+        updated = reject_alert(record, decision.analyst_note)
+        update_alert_result(alert_id, updated["result"])
         return {"success": True, "alert_id": alert_id, "hitl_approved": False}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
