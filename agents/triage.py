@@ -1,13 +1,4 @@
-# agents/triage.py
-"""
-Triage Agent — Node 1 of 5 in the LangGraph pipeline.
-
-Job   : Assess TRUE severity and decide whether this alert needs deep analysis.
-Model : Groq Llama 3.1 8B — fast + cheap, classification doesn't need 70B reasoning.
-Input : state["alert"] — the full AlertSchema dict
-Output: partial state dict with triage_* keys filled in
-"""
-import config  # Must be first — activates LangSmith tracing
+import config 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field, ConfigDict
@@ -17,20 +8,15 @@ from alerts.schemas import SeverityLevel
 # ── What the LLM fills in ──────────────────────────────────────────────────────
 # Separate from AgentOutput intentionally:
 #   - LLM fills: severity, escalate, confidence, reasoning
-#   - We set:    agent_name, alert_id (don't make the LLM invent these)
+#   - I set:    agent_name, alert_id (don't make the LLM invent these)
 
 class TriageDecision(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
-    severity:         SeverityLevel  # LLM's assessed severity — may override original
-    escalate:         bool           # True → forward to Analysis agent
+    severity:         SeverityLevel  
+    escalate:         bool          
     confidence_score: float = Field(..., ge=0.0, le=1.0)
-    reasoning:        str            # 1-2 sentences max
+    reasoning:        str           
 
-
-# ── Prompt ─────────────────────────────────────────────────────────────────────
-# System: role + rules. Human: the actual alert data.
-# Keeping rules in system message means they stay outside the token window
-# once we add conversation history — won't drift as alerts get longer.
 
 TRIAGE_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """You are a SOC Tier-1 Analyst performing initial alert triage.
@@ -96,16 +82,20 @@ def run_triage(state: dict) -> dict:
             "raw_log"       : alert["raw_log"],
         })
 
+        forced_escalate = result.severity in ("HIGH", "CRITICAL")
+        final_escalate = result.escalate or forced_escalate
+
         print(f"  🔍 Triage  → {result.severity} | "
               f"Confidence: {result.confidence_score:.2f} | "
-              f"Escalate: {result.escalate}")
+              f"Escalate: {final_escalate}"
+              f"{' (forced by severity)' if forced_escalate and not result.escalate else ''}")
         print(f"     Reason : {result.reasoning}")
 
         return {
             "triage_severity"   : result.severity,
             "triage_confidence" : result.confidence_score,
             "triage_reasoning"  : result.reasoning,
-            "triage_escalate"   : result.escalate,
+            "triage_escalate"   : final_escalate,
         }
 
     except Exception as e:
@@ -113,7 +103,6 @@ def run_triage(state: dict) -> dict:
         print(f"  ❌ {err}")
         errors.append(err)
 
-        # Graceful fallback — original severity, escalate HIGH/CRITICAL to be safe
         return {
             "triage_severity"   : alert["severity"],
             "triage_confidence" : 0.0,

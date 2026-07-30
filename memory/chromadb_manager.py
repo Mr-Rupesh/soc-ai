@@ -1,4 +1,3 @@
-# memory/chromadb_manager.py
 import chromadb
 from chromadb.utils import embedding_functions
 import config

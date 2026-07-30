@@ -1,4 +1,3 @@
-# agents/memory.py
 from groq import Groq
 import config
 from memory.chromadb_manager import find_similar

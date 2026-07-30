@@ -1,4 +1,3 @@
-# agents/analysis.py
 """
 Analysis Agent — Node 2 of 5 in the LangGraph pipeline.
 
@@ -9,7 +8,7 @@ Runs  : ONLY when triage_escalate=True (LangGraph routes around this node otherw
 Input : state["alert"] + state["triage_*"] keys
 Output: partial state dict with attack_type / mitre_* / otx_indicators / analysis_*
 """
-import config  # Must be first — activates LangSmith tracing
+import config  
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field

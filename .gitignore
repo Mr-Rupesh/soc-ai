@@ -17,3 +17,6 @@ __pycache__/
 *.egg-info/
 
 alerts.db
+
+# Documentation / AI Guide
+CLAUDE.md

@@ -1,20 +1,17 @@
-# agents/report.py
 """
 Report Agent — Node 5 of 5 in the LangGraph pipeline.
 
 Job   : Synthesize all upstream agent outputs into one final markdown report
         for the Streamlit dashboard — this is what a human analyst reads.
-Model : Groq (temporary — Gemini free tier is blocked on Google's account
-        verification, see memory note). Swap back to Gemini once resolved;
-        report.py is intentionally isolated so that swap is a 5-line change.
+Model : Groq (llama-3.1-8b-instant) — fast, cheap summarization.
 Input : state["alert"] + every triage_/attack_/memory_/ir_/hitl_/response_ key
 Output: partial state dict with final_report (markdown string) + pipeline_complete
 """
-import config  # Must be first — activates LangSmith tracing
+import config  
 from groq import Groq
 
 _client = Groq(api_key=config.GROQ_API_KEY)
-REPORT_MODEL = config.GROQ_MODELS["report"] # matches config.GROQ_MODELS["report"] — fast, cheap, pure summarization
+REPORT_MODEL = config.GROQ_MODELS["report"]  # report summary model
 
 REPORT_PROMPT_TEMPLATE = """You are a SOC report writer. Write a CONCISE markdown
 incident report (under 200 words) from the data below. Use these exact section

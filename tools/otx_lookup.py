@@ -1,4 +1,3 @@
-# tools/otx_lookup.py
 """
 AlienVault OTX Threat Intelligence Tool.
 

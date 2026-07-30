@@ -1,4 +1,3 @@
-# ui/dashboard.py
 """
 SOC-AI Streamlit Dashboard.
 
@@ -88,6 +87,16 @@ for alert in alerts:
         with col_b:
             st.write("**Attack Type:**", result.get("attack_type", "N/A"))
             st.write("**MITRE ID:**", result.get("mitre_id", "N/A"))
+            st.write("**MITRE Technique:**", result.get("mitre_technique", "N/A"))
+
+            if result.get("analysis_confidence") is not None:
+                st.write("**Analysis Confidence:**", f"{result['analysis_confidence']:.2f}")
+            if result.get("analysis_reasoning"):
+                st.write("**Analysis Reasoning:**", result["analysis_reasoning"])
+            if result.get("otx_indicators"):
+                with st.expander("🌐 OTX Threat Intel"):
+                    st.json(result["otx_indicators"])
+
             st.write("**HITL Required:**", "Yes" if hitl_required else "No")
 
             if hitl_required:

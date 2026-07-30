@@ -1,4 +1,3 @@
-# agents/response.py
 """
 Response Agent — Node 4 of 5 in the LangGraph pipeline.
 
@@ -9,7 +8,7 @@ Input : state["alert"], state["triage_*"], state["attack_type"/"mitre_*"],
          state["memory_summary"], state["similar_incidents"]
 Output: partial state dict with ir_actions / hitl_required / response_*
 """
-import config  # Must be first — activates LangSmith tracing
+import config  
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -35,7 +34,7 @@ def determine_hitl(state: dict) -> bool:
 
 
 class ResponseDecision(BaseModel):
-    ir_actions:       list[str]              # ordered list, e.g. ["Isolate host", "Reset credentials"]
+    ir_actions:       list[str]        
     confidence_score: float = Field(..., ge=0.0, le=1.0)
     reasoning:        str
 
@@ -106,7 +105,7 @@ def run_response(state: dict) -> dict:
         return {
             "ir_actions":          result.ir_actions,
             "hitl_required":       hitl_required,
-            "hitl_approved":       None,  # unset until analyst acts
+            "hitl_approved":       None,  
             "response_confidence": result.confidence_score,
             "response_reasoning":  result.reasoning,
         }

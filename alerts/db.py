@@ -2,9 +2,7 @@
 """
 SQLite persistence for alert_store.
 
-Job: Replace api/main.py's in-memory dict with a file-backed store so alerts
-survive server restarts. Same shape as before (alert_id -> record dict),
-just backed by disk instead of RAM.
+Job: File-backed store so alerts survive server restarts.
 """
 import sqlite3
 import json

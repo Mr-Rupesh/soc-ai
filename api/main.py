@@ -1,20 +1,105 @@
-# api/main.py
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import config  # Must import first — activates LangSmith tracing before anything else
+import config  
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from datetime import datetime, timezone
-from typing import Any
+from typing import Optional, Any
 import asyncio
 
 from alerts.schemas import AlertSchema
 from alerts.db import init_db, save_alert, update_alert_result, get_alert, get_all_alerts, clear_all
-from api.models import IngestResponse, StatusResponse, AlertSummary
 from pipeline.graph import compiled_graph
+
+
+# ── Response models (merged from api/models.py) ───────────────────────────────
+
+class IngestResponse(BaseModel):
+    """Returned to the caller after an alert is received."""
+    success:   bool
+    alert_id:  str
+    message:   str
+    timestamp: datetime
+
+
+class StatusResponse(BaseModel):
+    """Health check response."""
+    status:      str
+    total_alerts: int
+    pipeline_ready: bool
+
+
+class AlertSummary(BaseModel):
+    """Lightweight alert info for dashboard listing — not the full schema."""
+    alert_id:   str
+    event_type: str
+    severity:   str
+    hostname:   str
+    source_ip:  str
+    timestamp:  datetime
+    processed:  bool
+    result:     Optional[Any] = None
+
+
+class HitlDecision(BaseModel):
+    analyst_note: str = ""
+
+
+# ── HITL logic (merged from pipeline/hitl.py) ──────────────────────────────────
+
+def approve_alert(alert_record: dict, analyst_note: str = "") -> dict:
+    """
+    Marks an alert's IR plan as approved for execution.
+
+    alert_record is the dict stored in alert_store[alert_id] —
+    mutated in place and returned for clarity, not a new object.
+    """
+    if not alert_record.get("result"):
+        raise ValueError("Cannot approve an alert that hasn't finished processing")
+
+    alert_record["result"]["hitl_approved"] = True
+    alert_record["result"]["hitl_decision_at"] = datetime.now(timezone.utc).isoformat()
+    alert_record["result"]["hitl_analyst_note"] = analyst_note
+
+    print(f"  ✅ [HITL] Alert approved — IR actions cleared for execution")
+    return alert_record
+
+
+def reject_alert(alert_record: dict, analyst_note: str = "") -> dict:
+    """
+    Marks an alert's IR plan as rejected — e.g. analyst determined it's a
+    false positive. This is also the hook point for the feedback loop:
+    a rejected alert should be written back to ChromaDB with
+    false_positive=True so future similar alerts reference the correction.
+    """
+    if not alert_record.get("result"):
+        raise ValueError("Cannot reject an alert that hasn't finished processing")
+
+    alert_record["result"]["hitl_approved"] = False
+    alert_record["result"]["hitl_decision_at"] = datetime.now(timezone.utc).isoformat()
+    alert_record["result"]["hitl_analyst_note"] = analyst_note
+
+    # ── Feedback loop hook ──────────────────────────────────────────────
+    # Write back to ChromaDB marking this as a false positive, so future
+    # find_similar() calls surface "this pattern was previously rejected."
+    from memory.chromadb_manager import store_alert
+
+    store_alert(
+        alert=alert_record["alert"],
+        pipeline_result={
+            "attack_type":    alert_record["result"].get("attack_type", "unknown"),
+            "mitre_id":       alert_record["result"].get("mitre_id", "unknown"),
+            "false_positive": True,
+        },
+    )
+
+    print(f"  ❌ [HITL] Alert rejected — false positive recorded in ChromaDB")
+    return alert_record
+
 
 # ── App setup ──────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -47,14 +132,19 @@ async def run_pipeline(alert_id: str, alert: AlertSchema):
         final_state = await asyncio.to_thread(compiled_graph.invoke, initial_state)
 
         result = {
-            "final_report":     final_state.get("final_report"),
-            "triage_severity":  final_state.get("triage_severity"),
-            "attack_type":      final_state.get("attack_type"),
-            "mitre_id":         final_state.get("mitre_id"),
-            "hitl_required":    final_state.get("hitl_required"),
-            "hitl_approved":    None,  # unset until analyst acts
-            "ir_actions":       final_state.get("ir_actions"),
-            "errors":           final_state.get("errors", []),
+            "final_report":       final_state.get("final_report"),
+            "triage_severity":    final_state.get("triage_severity"),
+            "triage_confidence":  final_state.get("triage_confidence"),
+            "attack_type":        final_state.get("attack_type"),
+            "mitre_id":           final_state.get("mitre_id"),
+            "mitre_technique":    final_state.get("mitre_technique"),
+            "analysis_confidence":final_state.get("analysis_confidence"),
+            "analysis_reasoning": final_state.get("analysis_reasoning"),
+            "otx_indicators":     final_state.get("otx_indicators"),
+            "hitl_required":      final_state.get("hitl_required"),
+            "hitl_approved":      None,  # unset until analyst acts
+            "ir_actions":         final_state.get("ir_actions"),
+            "errors":             final_state.get("errors", []),
         }
         update_alert_result(alert_id, result)
 
@@ -71,7 +161,7 @@ async def run_pipeline(alert_id: str, alert: AlertSchema):
 
 @app.get("/health", response_model=StatusResponse)
 async def health_check():
-    all_alerts = get_all_alerts(limit=10000)  # count only — fine at this scale
+    all_alerts = get_all_alerts(limit=10000)  
     return StatusResponse(
         status="ok",
         total_alerts=len(all_alerts),
@@ -126,13 +216,6 @@ async def get_alert_by_id(alert_id: str):
 async def clear_alerts():
     count = clear_all()
     return {"cleared": count}
-
-
-from pipeline.hitl import approve_alert, reject_alert
-from pydantic import BaseModel
-
-class HitlDecision(BaseModel):
-    analyst_note: str = ""
 
 
 @app.post("/alerts/{alert_id}/approve")

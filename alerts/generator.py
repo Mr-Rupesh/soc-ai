@@ -10,8 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from alerts.schemas import AlertSchema, SeverityLevel, EventType
 
 # ── FastAPI target ─────────────────────────────────────────────────────────────
-# This is where generator POSTs alerts to.
-# FastAPI isn't built yet — generator will fail gracefully until it is built.
+# Ingestion endpoint for security alerts
 API_URL = "http://127.0.0.1:8000/alerts/ingest"
 
 # ── Realistic data pools ───────────────────────────────────────────────────────
@@ -239,7 +238,7 @@ def post_alert(alert: AlertSchema) -> bool:
             print(f"  ⚠️  FastAPI returned {response.status_code}: {response.text[:100]}")
             return False
     except requests.exceptions.ConnectionError:
-        print(f"  ⚠️  FastAPI not running — alert not sent (this is expected until api/ is built)")
+        print(f"  ⚠️  FastAPI not running at {API_URL}")
         return False
     except Exception as e:
         print(f"  ❌ Unexpected error: {e}")
