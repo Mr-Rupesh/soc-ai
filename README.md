@@ -71,7 +71,7 @@ LangGraph automatically merges each agent's output into the shared state. But wh
 ## What I Deliberately Left Out
 
 - **Gemini as a fallback LLM** — I set up a config variable for it but never actually wired the switching logic in. Rather than leave it half-built, I dropped it and just kept everything on Groq.
-- **OpenTelemetry + SigNoz for observability** — I considered adding this for tracking latency/token cost separately from LangSmith, but decided to keep the observability side simple with just LangSmith for now.
+- **SigNoz for observability** — I considered adding this for tracking latency/token cost separately from LangSmith, but decided to keep the observability side simple with just LangSmith for now.
 - **Eval coverage for Memory/Response/Report agents** — right now my eval only checks Triage and Analysis, because those have one clear right answer (severity level, attack type) to compare against. The other three agents produce open-ended text/lists, which needs a different way of checking correctness (like checking for required keywords) that I haven't built yet.
 
 ---
