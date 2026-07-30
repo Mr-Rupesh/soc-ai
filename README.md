@@ -8,7 +8,18 @@ This is a personal project, separate from my college work. I wanted to focus on 
 
 ## Architecture
 
-*   *
+```mermaid
+flowchart TD
+    A[Alert comes in] --> B[Triage]
+    B -->|if escalate| C[Analysis]
+    C --> D[OTX Lookup: check IP]
+    D --> E[Memory]
+    B -->|not escalated| E
+    E --> F[Response]
+    F --> G[Report]
+    G --> H[Dashboard - Streamlit]
+    H -->|if HITL required| I[Human approves/rejects]
+```
 
 Basic flow: an alert comes in → Triage agent decides how serious it is → if serious enough, Analysis agent digs deeper and checks threat intel → Memory agent checks if we've seen something like this before → Response agent writes up an action plan → Report agent writes the final summary. If it's CRITICAL, a human has to approve before anything happens.
 
@@ -147,10 +158,11 @@ soc_system/
 ├── .env
 ├── config.py
 ├── requirements.txt
+├── alerts.db                  # SQLite — created at runtime, gitignored
 ├── alerts/
-│   ├── schemas.py         # Normalizes all incoming alert data
-│   ├── generator.py       # Makes fake alerts for testing
-│   └── db.py              # SQLite storage
+│   ├── schemas.py              # AlertSchema, AgentOutput — validation + UTC normalization
+│   ├── generator.py             # Synthetic alert generator, posts to FastAPI
+│   └── db.py                    # SQLite persistence (save/get/update alerts)
 ├── agents/
 │   ├── triage.py
 │   ├── analysis.py
@@ -158,19 +170,15 @@ soc_system/
 │   ├── response.py
 │   └── report.py
 ├── tools/
-│   └── otx_lookup.py      # AlienVault OTX threat intel lookup
+│   └── otx_lookup.py            # AlienVault OTX threat intel lookup
 ├── memory/
-│   └── chromadb_manager.py
+│   └── chromadb_manager.py      # store_alert / find_similar
 ├── pipeline/
-│   ├── state.py           # Shared state that flows through all agents
-│   ├── graph.py            # Wires the 5 agents together
-│   └── hitl.py             # Human approve/reject logic
+│   └── graph.py                 # PipelineState + StateGraph wiring (all 5 agents)
 ├── api/
-│   ├── main.py
-│   └── models.py
+│   └── main.py                  # FastAPI: ingest, alerts, approve/reject (HITL logic inline)
 ├── evaluation/
-│   ├── labeled_alerts.py   # My hand-labeled test cases
-│   └── metrics.py          # Runs the eval, prints accuracy
+│   └── metrics.py               # Labeled alerts + eval scoring (Triage + Analysis only)
 └── ui/
     └── dashboard.py
 ```
